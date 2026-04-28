@@ -1,0 +1,88 @@
+{
+  "name": "every-sound-player",
+  "displayName": "Every Sound Player",
+  "description": "Play CAF, WAV, MP3, M4A, AAC, FLAC, OGG, OPUS, AIFF, AU, AC3, AMR, and more directly inside VS Code, with a clean waveform-based player.",
+  "version": "0.1.0",
+  "publisher": "gotnull",
+  "license": "MIT",
+  "author": {
+    "name": "gotnull",
+    "url": "https://github.com/gotnull"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gotnull/every-sound-player.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gotnull/every-sound-player/issues"
+  },
+  "homepage": "https://github.com/gotnull/every-sound-player#readme",
+  "keywords": [
+    "audio",
+    "player",
+    "caf",
+    "wav",
+    "mp3",
+    "flac",
+    "aac",
+    "m4a",
+    "ogg",
+    "opus",
+    "aiff",
+    "waveform",
+    "preview"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other", "Visualization"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "every-sound-player.player",
+        "displayName": "Every Sound Player",
+        "selector": [
+          { "filenamePattern": "*.caf" },
+          { "filenamePattern": "*.CAF" },
+          { "filenamePattern": "*.wav" },
+          { "filenamePattern": "*.WAV" },
+          { "filenamePattern": "*.mp3" },
+          { "filenamePattern": "*.MP3" },
+          { "filenamePattern": "*.m4a" },
+          { "filenamePattern": "*.M4A" },
+          { "filenamePattern": "*.aac" },
+          { "filenamePattern": "*.AAC" },
+          { "filenamePattern": "*.flac" },
+          { "filenamePattern": "*.FLAC" },
+          { "filenamePattern": "*.ogg" },
+          { "filenamePattern": "*.OGG" },
+          { "filenamePattern": "*.oga" },
+          { "filenamePattern": "*.opus" },
+          { "filenamePattern": "*.weba" },
+          { "filenamePattern": "*.aiff" },
+          { "filenamePattern": "*.AIFF" },
+          { "filenamePattern": "*.aif" },
+          { "filenamePattern": "*.aifc" },
+          { "filenamePattern": "*.au" },
+          { "filenamePattern": "*.snd" },
+          { "filenamePattern": "*.ac3" },
+          { "filenamePattern": "*.amr" },
+          { "filenamePattern": "*.3gp" },
+          { "filenamePattern": "*.3g2" }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

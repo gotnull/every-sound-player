@@ -1,0 +1,259 @@
+:root {
+  --accent: var(--vscode-progressBar-background, var(--vscode-button-background, #0e639c));
+  --accent-hover: var(--vscode-button-hoverBackground, var(--vscode-focusBorder, #1177bb));
+  --surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  --surface-2: var(--vscode-input-background, rgba(255,255,255,0.04));
+  --border: var(--vscode-widget-border, var(--vscode-panel-border, rgba(255,255,255,0.08)));
+  --fg: var(--vscode-foreground);
+  --fg-muted: var(--vscode-descriptionForeground, rgba(255,255,255,0.55));
+  --shadow: 0 30px 80px -20px rgba(0,0,0,0.55), 0 8px 24px -8px rgba(0,0,0,0.35);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+
+body {
+  font-family: var(--vscode-font-family);
+  color: var(--fg);
+  background:
+    radial-gradient(1200px 600px at 20% -10%, color-mix(in oklab, var(--accent) 18%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 110% 110%, color-mix(in oklab, var(--accent) 14%, transparent), transparent 65%),
+    var(--vscode-editor-background);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem 1.5rem;
+  min-height: 100vh;
+  gap: 1rem;
+}
+
+.player {
+  width: 100%;
+  max-width: 720px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.6rem 1.6rem 1.4rem;
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.player::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, transparent), transparent 40%);
+  pointer-events: none;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 0.85rem;
+  row-gap: 0.2rem;
+  align-items: center;
+  margin-bottom: 1.3rem;
+  position: relative;
+}
+
+.badge {
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: color-mix(in oklab, var(--accent) 75%, white 25%);
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
+  text-align: center;
+  min-width: 52px;
+}
+
+.filename {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  font-size: 0.76rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.visual {
+  position: relative;
+  margin-bottom: 0.5rem;
+}
+
+.waveform {
+  display: block;
+  width: 100%;
+  height: 110px;
+  cursor: pointer;
+  border-radius: 8px;
+  background: linear-gradient(180deg, transparent, color-mix(in oklab, var(--accent) 4%, transparent));
+}
+
+.loader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.25s;
+}
+.player[data-state="paused"] .loader,
+.player[data-state="playing"] .loader,
+.player[data-state="error"] .loader { opacity: 0; }
+
+.loader-bar {
+  width: 3px;
+  height: 22px;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: loaderPulse 1s ease-in-out infinite;
+  opacity: 0.8;
+}
+.loader-bar:nth-child(2) { animation-delay: 0.1s; }
+.loader-bar:nth-child(3) { animation-delay: 0.2s; }
+.loader-bar:nth-child(4) { animation-delay: 0.3s; }
+.loader-bar:nth-child(5) { animation-delay: 0.4s; }
+
+@keyframes loaderPulse {
+  0%, 100% { transform: scaleY(0.4); opacity: 0.4; }
+  50%      { transform: scaleY(1.3); opacity: 1; }
+}
+
+.time-row {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  padding: 0 4px;
+  margin-bottom: 1rem;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.spacer { flex: 1; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, background 0.15s ease, opacity 0.2s ease;
+}
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ctrl-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: var(--fg);
+  opacity: 0.8;
+}
+.ctrl-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  opacity: 1;
+}
+
+.play-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--vscode-button-foreground, white);
+  box-shadow: 0 8px 24px -8px color-mix(in oklab, var(--accent) 80%, transparent);
+}
+.play-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: scale(1.05);
+}
+.play-btn:active:not(:disabled) { transform: scale(0.96); }
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--fg-muted);
+  width: 140px;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  background: var(--accent);
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+  transition: transform 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+
+#audio { display: none; }
+
+.status {
+  margin-top: 0.9rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--fg-muted);
+  word-break: break-all;
+  border-left: 3px solid var(--border);
+}
+.status.error {
+  color: var(--vscode-errorForeground, #f48771);
+  border-left-color: var(--vscode-errorForeground, #f48771);
+}
+
+.attribution {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  display: flex;
+  gap: 0.5rem;
+  opacity: 0.6;
+}
+.attribution a {
+  color: inherit;
+  text-decoration: none;
+}
+.attribution a:hover {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
