@@ -1,9 +1,14 @@
 {
   "name": "every-sound-player",
   "displayName": "Every Sound Player",
-  "description": "Play CAF, WAV, MP3, M4A, AAC, FLAC, OGG, OPUS, AIFF, AU, AC3, AMR, and more directly inside VS Code, with a clean waveform-based player.",
-  "version": "0.1.1",
+  "description": "Play CAF, WAV, MP3, M4A, AAC, FLAC, OGG, OPUS, AIFF, AU, AC3, AMR, WMA and more inside VS Code, with a waveform, loop regions, speed control and level meters.",
+  "version": "0.2.0",
   "publisher": "gotnull",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
   "license": "MIT",
   "author": {
     "name": "gotnull",
@@ -30,7 +35,10 @@
     "opus",
     "aiff",
     "waveform",
-    "preview"
+    "preview",
+    "sound effects",
+    "game audio",
+    "loop"
   ],
   "engines": {
     "vscode": "^1.85.0"
@@ -39,6 +47,31 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Every Sound Player",
+      "properties": {
+        "everySoundPlayer.autoplay": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start playing as soon as an audio file is opened."
+        },
+        "everySoundPlayer.loop": {
+          "type": "boolean",
+          "default": false,
+          "description": "Turn on looping by default for newly opened files."
+        },
+        "everySoundPlayer.reloadOnChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reload the player when the file changes on disk, keeping the playback position."
+        },
+        "everySoundPlayer.ffmpegPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to an ffmpeg binary, used to decode formats the editor cannot play (and on Linux and Windows, where afconvert is unavailable). ffprobe is looked up next to it. Leave empty to search PATH."
+        }
+      }
+    },
     "customEditors": [
       {
         "viewType": "every-sound-player.player",
@@ -70,7 +103,17 @@
           { "filenamePattern": "*.ac3" },
           { "filenamePattern": "*.amr" },
           { "filenamePattern": "*.3gp" },
-          { "filenamePattern": "*.3g2" }
+          { "filenamePattern": "*.3g2" },
+          { "filenamePattern": "*.m4b" },
+          { "filenamePattern": "*.m4r" },
+          { "filenamePattern": "*.caff" },
+          { "filenamePattern": "*.mp2" },
+          { "filenamePattern": "*.wma" },
+          { "filenamePattern": "*.wv" },
+          { "filenamePattern": "*.ape" },
+          { "filenamePattern": "*.mka" },
+          { "filenamePattern": "*.dts" },
+          { "filenamePattern": "*.eac3" }
         ]
       }
     ]

@@ -1,25 +1,54 @@
 (function () {
   const vscode = acquireVsCodeApi();
+  const $ = (id) => document.getElementById(id);
+
   const playerEl = document.querySelector('.player');
-  const audio = document.getElementById('audio');
-  const playPause = document.getElementById('playPause');
-  const rewind = document.getElementById('rewind');
-  const forward = document.getElementById('forward');
-  const iconPlay = document.getElementById('iconPlay');
-  const iconPause = document.getElementById('iconPause');
-  const volume = document.getElementById('volume');
-  const currentEl = document.getElementById('current');
-  const durationEl = document.getElementById('duration');
-  const meta = document.getElementById('meta');
-  const status = document.getElementById('status');
-  const canvas = document.getElementById('waveform');
+  const audio = $('audio');
+  const playPause = $('playPause');
+  const rewind = $('rewind');
+  const forward = $('forward');
+  const loopBtn = $('loop');
+  const speedBtn = $('speed');
+  const muteBtn = $('mute');
+  const iconPlay = $('iconPlay');
+  const iconPause = $('iconPause');
+  const iconVolume = $('iconVolume');
+  const iconMuted = $('iconMuted');
+  const volume = $('volume');
+  const currentEl = $('current');
+  const durationEl = $('duration');
+  const regionEl = $('region');
+  const meta = $('meta');
+  const stats = $('stats');
+  const status = $('status');
+  const visual = $('visual');
+  const canvas = $('waveform');
+  const selectionEl = $('selection');
+  const playheadEl = $('playhead');
+  const hoverTimeEl = $('hoverTime');
   const ctx = canvas.getContext('2d');
 
+  const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const DRAG_THRESHOLD_PX = 4;
+
+  let audioBuffer = null;
   let peaks = null;
+  let info = null;
+  let fileSize = 0;
   let cssWidth = 0;
   let cssHeight = 0;
   let hoverX = -1;
   let rafId = 0;
+  let resizeTimer = 0;
+  let showRemaining = false;
+  let loopOn = false;
+  let speedIdx = SPEEDS.indexOf(1);
+  let autoplay = false;
+  let firstLoad = true;
+  let region = null; // { start, end } in seconds
+  let drag = null;   // { x0, t0, moved }
+  let pendingResume = null; // { time, playing } across a reload
+
   // True while playing the original file bytes; a failure then triggers one
   // transcode request rather than an error.
   let nativeSource = false;
@@ -30,7 +59,7 @@
     if (transcodeRequested) return false;
     transcodeRequested = true;
     nativeSource = false;
-    meta.textContent = 'transcoding…';
+    meta.textContent = 'transcoding...';
     vscode.postMessage({ type: 'transcode' });
     return true;
   }
@@ -43,11 +72,23 @@
     status.appendChild(line);
   }
 
-  function fmt(t) {
-    if (!isFinite(t) || t < 0) return '0:00';
+  function clearStatus() {
+    status.hidden = true;
+    status.textContent = '';
+  }
+
+  // Sound effects are often under a second, where whole seconds say nothing.
+  function precise() {
+    return isFinite(audio.duration) && audio.duration < 60;
+  }
+
+  function fmt(t, withFraction) {
+    if (!isFinite(t) || t < 0) t = 0;
     const m = Math.floor(t / 60);
     const s = Math.floor(t % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
+    if (!withFraction) return `${m}:${s}`;
+    const cs = Math.floor((t % 1) * 100).toString().padStart(2, '0');
+    return `${m}:${s}.${cs}`;
   }
 
   function setupCanvas() {
@@ -65,26 +106,28 @@
     return v || fallback;
   }
 
+  function progress() {
+    return audio.duration ? audio.currentTime / audio.duration : 0;
+  }
+
   function drawWaveform() {
     if (!cssWidth || !cssHeight) return;
     ctx.clearRect(0, 0, cssWidth, cssHeight);
+    updateOverlays();
+    if (!peaks) return;
 
-    const colorBg = readVar('--vscode-editor-background', '#1e1e1e');
     const colorMuted = readVar('--vscode-descriptionForeground', '#888');
     const colorAccent = readVar('--vscode-progressBar-background', '#0e639c') ||
                         readVar('--vscode-button-background', '#0e639c');
     const colorHover = readVar('--vscode-focusBorder', '#007acc');
-
-    if (!peaks) return;
 
     const barWidth = 2;
     const gap = 1;
     const stride = barWidth + gap;
     const numBars = Math.floor(cssWidth / stride);
     const mid = cssHeight / 2;
-    const progress = audio.duration ? audio.currentTime / audio.duration : 0;
-    const playedBars = Math.floor(numBars * progress);
-    const hoverBar = hoverX >= 0 ? Math.floor((hoverX / cssWidth) * numBars) : -1;
+    const playedBars = Math.floor(numBars * progress());
+    const hoverBar = hoverX >= 0 && !drag ? Math.floor((hoverX / cssWidth) * numBars) : -1;
 
     const peaksLen = peaks.length;
     for (let i = 0; i < numBars; i++) {
@@ -94,9 +137,7 @@
       const x = i * stride;
       const y = mid - h / 2;
 
-      let color;
-      if (i < playedBars) color = colorAccent;
-      else color = colorMuted;
+      let color = i < playedBars ? colorAccent : colorMuted;
       if (hoverBar >= 0 && i >= Math.min(playedBars, hoverBar) && i <= Math.max(playedBars, hoverBar)) {
         color = colorHover;
       }
@@ -108,23 +149,54 @@
     ctx.globalAlpha = 1;
   }
 
+  function updateOverlays() {
+    const d = audio.duration;
+    if (!d || !isFinite(d)) {
+      playheadEl.hidden = true;
+      selectionEl.hidden = true;
+      return;
+    }
+    playheadEl.hidden = false;
+    playheadEl.style.left = `${progress() * 100}%`;
+    if (region) {
+      selectionEl.hidden = false;
+      selectionEl.style.left = `${(region.start / d) * 100}%`;
+      selectionEl.style.width = `${((region.end - region.start) / d) * 100}%`;
+    } else {
+      selectionEl.hidden = true;
+    }
+  }
+
+  function updateTime() {
+    const p = precise();
+    const t = showRemaining ? Math.max(0, (audio.duration || 0) - audio.currentTime) : audio.currentTime;
+    currentEl.textContent = (showRemaining ? '-' : '') + fmt(t, p);
+    durationEl.textContent = fmt(audio.duration, p);
+  }
+
+  // timeupdate fires about four times a second, too coarse for short sounds
+  // and for region loop points, so drive both from animation frames instead.
   function startAnim() {
     cancelAnimationFrame(rafId);
     const tick = () => {
+      if (region && audio.currentTime >= region.end) {
+        audio.currentTime = region.start;
+      }
+      updateTime();
       drawWaveform();
       if (!audio.paused) rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
   }
 
-  function computePeaks(audioBuffer, targetCount) {
-    const channels = audioBuffer.numberOfChannels;
-    const length = audioBuffer.length;
+  function computePeaks(buf, targetCount) {
+    const channels = buf.numberOfChannels;
+    const length = buf.length;
     const samplesPerPeak = Math.max(1, Math.floor(length / targetCount));
     const peaksOut = new Float32Array(targetCount);
 
     const data = [];
-    for (let c = 0; c < channels; c++) data.push(audioBuffer.getChannelData(c));
+    for (let c = 0; c < channels; c++) data.push(buf.getChannelData(c));
 
     for (let p = 0; p < targetCount; p++) {
       const start = p * samplesPerPeak;
@@ -149,6 +221,33 @@
     return peaksOut;
   }
 
+  function computeLevels(buf) {
+    let peak = 0;
+    let sumSq = 0;
+    let clipped = 0;
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = 0; i < d.length; i++) {
+        const a = Math.abs(d[i]);
+        if (a > peak) peak = a;
+        if (a >= 1) clipped++;
+        sumSq += d[i] * d[i];
+      }
+    }
+    const n = buf.length * buf.numberOfChannels;
+    return { peak, rms: n ? Math.sqrt(sumSq / n) : 0, clipped };
+  }
+
+  function dbfs(v) {
+    if (v <= 0) return '-inf dBFS';
+    return `${(20 * Math.log10(v)).toFixed(1)} dBFS`;
+  }
+
+  function rebuildPeaks() {
+    if (!audioBuffer) return;
+    peaks = computePeaks(audioBuffer, Math.max(64, Math.floor(cssWidth / 3)));
+  }
+
   async function decodeForWaveform(arrayBuffer) {
     const Ctor = window.AudioContext || window.webkitAudioContext;
     if (!Ctor) return { buf: null };
@@ -162,16 +261,50 @@
     }
   }
 
-  function setMeta(audioBuffer, fileSize, mime) {
+  function channelLabel(n) {
+    return n === 1 ? 'mono' : n === 2 ? 'stereo' : `${n} ch`;
+  }
+
+  function renderMeta() {
+    const parts = [];
+    if (info) {
+      if (info.codec) parts.push(info.codec);
+      if (info.sampleRate) parts.push(`${+(info.sampleRate / 1000).toFixed(3)} kHz`);
+      if (info.bitDepth) parts.push(`${info.bitDepth}-bit`);
+      if (info.channels) parts.push(channelLabel(info.channels));
+      if (info.bitRate) parts.push(`${Math.round(info.bitRate / 1000)} kbps`);
+    } else if (audioBuffer) {
+      // decodeAudioData resamples, so only the channel count is trustworthy here.
+      parts.push(channelLabel(audioBuffer.numberOfChannels));
+    }
+    if (fileSize) parts.push(formatBytes(fileSize));
+    if (parts.length) meta.textContent = parts.join(' · ');
+  }
+
+  function renderStats() {
     if (!audioBuffer) {
-      meta.textContent = `${formatBytes(fileSize)} · ${mime}`;
+      stats.hidden = true;
       return;
     }
-    const sr = (audioBuffer.sampleRate / 1000).toFixed(1);
-    const ch = audioBuffer.numberOfChannels === 1 ? 'mono' :
-               audioBuffer.numberOfChannels === 2 ? 'stereo' :
-               `${audioBuffer.numberOfChannels} ch`;
-    meta.textContent = `${sr} kHz · ${ch} · ${formatBytes(fileSize)}`;
+    const lv = computeLevels(audioBuffer);
+    const rows = [
+      ['Peak', dbfs(lv.peak)],
+      ['RMS', dbfs(lv.rms)],
+      ['Length', `${audioBuffer.duration.toFixed(3)} s`],
+    ];
+    if (lv.clipped) rows.push(['Clipped', `${lv.clipped.toLocaleString()} samples`]);
+    stats.textContent = '';
+    for (const [k, v] of rows) {
+      const wrap = document.createElement('div');
+      const dt = document.createElement('dt');
+      const dd = document.createElement('dd');
+      dt.textContent = k;
+      dd.textContent = v;
+      if (k === 'Clipped') wrap.classList.add('warn');
+      wrap.append(dt, dd);
+      stats.appendChild(wrap);
+    }
+    stats.hidden = false;
   }
 
   function formatBytes(n) {
@@ -182,17 +315,10 @@
     return `${n.toFixed(n >= 100 || u === 0 ? 0 : 1)} ${units[u]}`;
   }
 
-  function base64ToBytes(b64) {
-    const bin = atob(b64);
-    const len = bin.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes;
-  }
-
   function setPlaying(playing) {
-    iconPlay.hidden = playing;
-    iconPause.hidden = !playing;
+    // SVG elements have no hidden property, only the attribute.
+    iconPlay.toggleAttribute('hidden', playing);
+    iconPause.toggleAttribute('hidden', !playing);
     playPause.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     playerEl.dataset.state = playing ? 'playing' : 'paused';
   }
@@ -204,6 +330,77 @@
     playerEl.dataset.state = 'paused';
   }
 
+  function play() {
+    const p = audio.play();
+    if (p && p.catch) p.catch(err => showStatus(`play() rejected: ${err.name}: ${err.message}`, true));
+  }
+
+  function togglePlay() {
+    if (playPause.disabled) return;
+    if (audio.paused) play();
+    else audio.pause();
+  }
+
+  function seek(t) {
+    if (!audio.duration) return;
+    audio.currentTime = Math.min(Math.max(0, t), audio.duration);
+    updateTime();
+    drawWaveform();
+  }
+
+  function applyLoop() {
+    // A region loops by itself, so the element must not stop at the end.
+    audio.loop = loopOn || !!region;
+    loopBtn.classList.toggle('active', loopOn);
+    loopBtn.setAttribute('aria-pressed', String(loopOn));
+  }
+
+  function setLoop(on) {
+    loopOn = on;
+    applyLoop();
+  }
+
+  function setRegion(r) {
+    region = r && r.end - r.start > 0.01 ? r : null;
+    applyLoop();
+    if (region) {
+      regionEl.hidden = false;
+      const p = precise() || region.end - region.start < 10;
+      regionEl.textContent = `loop ${fmt(region.start, p)} - ${fmt(region.end, p)}`;
+    } else {
+      regionEl.hidden = true;
+    }
+    drawWaveform();
+  }
+
+  function setSpeed(idx) {
+    speedIdx = Math.min(SPEEDS.length - 1, Math.max(0, idx));
+    audio.defaultPlaybackRate = SPEEDS[speedIdx];
+    audio.playbackRate = SPEEDS[speedIdx];
+    speedBtn.textContent = `${SPEEDS[speedIdx]}x`;
+    speedBtn.classList.toggle('active', SPEEDS[speedIdx] !== 1);
+  }
+
+  function setMuted(m) {
+    audio.muted = m;
+    iconVolume.toggleAttribute('hidden', m);
+    iconMuted.toggleAttribute('hidden', !m);
+    muteBtn.setAttribute('aria-label', m ? 'Unmute' : 'Mute');
+  }
+
+  function setVolume(v, persist) {
+    audio.volume = v;
+    volume.value = String(Math.round(v * 100));
+    if (v > 0 && audio.muted) setMuted(false);
+    if (persist) vscode.postMessage({ type: 'volume', value: v });
+  }
+
+  function timeAt(clientX) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.min(Math.max(0, clientX - rect.left), rect.width);
+    return { x, t: (x / rect.width) * (audio.duration || 0) };
+  }
+
   audio.addEventListener('error', () => {
     if (nativeSource && requestTranscode()) return;
     const e = audio.error;
@@ -213,88 +410,176 @@
   });
   audio.addEventListener('canplay', () => {
     if (playerEl.dataset.state === 'loading') enableControls();
-  });
-  audio.addEventListener('loadedmetadata', () => {
-    durationEl.textContent = fmt(audio.duration);
-  });
-  audio.addEventListener('durationchange', () => {
-    durationEl.textContent = fmt(audio.duration);
-  });
-  audio.addEventListener('timeupdate', () => {
-    currentEl.textContent = fmt(audio.currentTime);
-    drawWaveform();
-  });
-  audio.addEventListener('play', () => { setPlaying(true); startAnim(); });
-  audio.addEventListener('pause', () => { setPlaying(false); drawWaveform(); });
-  audio.addEventListener('ended', () => { setPlaying(false); drawWaveform(); });
-
-  playPause.addEventListener('click', () => {
-    if (audio.paused) {
-      const p = audio.play();
-      if (p && p.catch) p.catch(err => showStatus(`play() rejected: ${err.name}: ${err.message}`, true));
-    } else {
-      audio.pause();
+    if (pendingResume) {
+      const r = pendingResume;
+      pendingResume = null;
+      seek(Math.min(r.time, audio.duration || 0));
+      if (r.playing) play();
+    } else if (firstLoad && autoplay) {
+      play();
     }
+    firstLoad = false;
   });
-  rewind.addEventListener('click', () => { audio.currentTime = Math.max(0, audio.currentTime - 5); });
-  forward.addEventListener('click', () => { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 5); });
+  audio.addEventListener('loadedmetadata', updateTime);
+  audio.addEventListener('durationchange', updateTime);
+  audio.addEventListener('timeupdate', () => {
+    if (audio.paused) { updateTime(); drawWaveform(); }
+  });
+  audio.addEventListener('play', () => {
+    setPlaying(true);
+    startAnim();
+    vscode.postMessage({ type: 'playing' });
+  });
+  audio.addEventListener('pause', () => { setPlaying(false); updateTime(); drawWaveform(); });
+  audio.addEventListener('ended', () => { setPlaying(false); updateTime(); drawWaveform(); });
+  audio.addEventListener('seeked', () => { updateTime(); drawWaveform(); });
 
-  volume.addEventListener('input', () => {
-    audio.volume = Number(volume.value) / 100;
+  playPause.addEventListener('click', togglePlay);
+  rewind.addEventListener('click', () => seek(audio.currentTime - 5));
+  forward.addEventListener('click', () => seek(audio.currentTime + 5));
+  loopBtn.addEventListener('click', () => setLoop(!loopOn));
+  speedBtn.addEventListener('click', () => setSpeed(speedIdx === SPEEDS.length - 1 ? 0 : speedIdx + 1));
+  muteBtn.addEventListener('click', () => setMuted(!audio.muted));
+  currentEl.addEventListener('click', () => {
+    showRemaining = !showRemaining;
+    currentEl.title = showRemaining ? 'Show elapsed time' : 'Show remaining time';
+    updateTime();
   });
+
+  volume.addEventListener('input', () => setVolume(Number(volume.value) / 100, false));
+  volume.addEventListener('change', () => setVolume(Number(volume.value) / 100, true));
 
   canvas.addEventListener('mousemove', (ev) => {
-    const rect = canvas.getBoundingClientRect();
-    hoverX = ev.clientX - rect.left;
+    const { x, t } = timeAt(ev.clientX);
+    hoverX = x;
+    if (audio.duration) {
+      hoverTimeEl.hidden = false;
+      hoverTimeEl.textContent = fmt(t, precise());
+      hoverTimeEl.style.left = `${x}px`;
+    }
     drawWaveform();
   });
-  canvas.addEventListener('mouseleave', () => { hoverX = -1; drawWaveform(); });
-  canvas.addEventListener('click', (ev) => {
-    if (!audio.duration) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = ev.clientX - rect.left;
-    audio.currentTime = (x / rect.width) * audio.duration;
+  canvas.addEventListener('mouseleave', () => {
+    hoverX = -1;
+    hoverTimeEl.hidden = true;
     drawWaveform();
+  });
+  canvas.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0 || !audio.duration) return;
+    const { x, t } = timeAt(ev.clientX);
+    drag = { x0: x, t0: t, moved: false };
+    ev.preventDefault();
+  });
+  window.addEventListener('mousemove', (ev) => {
+    if (!drag) return;
+    const { x, t } = timeAt(ev.clientX);
+    if (!drag.moved && Math.abs(x - drag.x0) < DRAG_THRESHOLD_PX) return;
+    drag.moved = true;
+    setRegion({ start: Math.min(drag.t0, t), end: Math.max(drag.t0, t) });
+  });
+  window.addEventListener('mouseup', (ev) => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    if (d.moved && region) {
+      seek(region.start);
+    } else {
+      const { t } = timeAt(ev.clientX);
+      if (region && (t < region.start || t > region.end)) setRegion(null);
+      seek(t);
+    }
   });
 
   document.addEventListener('keydown', (ev) => {
     if (ev.target instanceof HTMLInputElement) return;
-    if (ev.code === 'Space') { ev.preventDefault(); playPause.click(); }
-    else if (ev.code === 'ArrowLeft') { rewind.click(); }
-    else if (ev.code === 'ArrowRight') { forward.click(); }
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const d = audio.duration || 0;
+    const step = ev.shiftKey ? 1 : 5;
+    switch (ev.key) {
+      case ' ':
+        ev.preventDefault();
+        togglePlay();
+        break;
+      case 'ArrowLeft': ev.preventDefault(); seek(audio.currentTime - step); break;
+      case 'ArrowRight': ev.preventDefault(); seek(audio.currentTime + step); break;
+      case 'ArrowUp': ev.preventDefault(); setVolume(Math.min(1, audio.volume + 0.05), true); break;
+      case 'ArrowDown': ev.preventDefault(); setVolume(Math.max(0, audio.volume - 0.05), true); break;
+      case 'Home': seek(region ? region.start : 0); break;
+      case 'End': seek(region ? region.end : d); break;
+      case 'l': case 'L': setLoop(!loopOn); break;
+      case 'm': case 'M': setMuted(!audio.muted); break;
+      case '[': setSpeed(speedIdx - 1); break;
+      case ']': setSpeed(speedIdx + 1); break;
+      case '\\': setSpeed(SPEEDS.indexOf(1)); break;
+      case 'Escape': setRegion(null); break;
+      default:
+        if (/^[0-9]$/.test(ev.key)) seek((Number(ev.key) / 10) * d);
+    }
   });
 
-  window.addEventListener('resize', () => { setupCanvas(); drawWaveform(); });
+  window.addEventListener('resize', () => {
+    setupCanvas();
+    drawWaveform();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { rebuildPeaks(); drawWaveform(); }, 150);
+  });
 
   window.addEventListener('message', async (ev) => {
     const msg = ev.data;
     if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'audio') {
-      const bytes = base64ToBytes(msg.bytes);
-      setupCanvas();
-      const { buf, error } = await decodeForWaveform(bytes.buffer);
-      if (!buf && !msg.decoded && requestTranscode()) return;
-      if (error) showStatus(`waveform decode failed: ${error.message || error}`, true);
-
-      nativeSource = !msg.decoded;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      objectUrl = URL.createObjectURL(new Blob([bytes], { type: msg.mime || 'audio/wav' }));
-      audio.src = objectUrl;
-
-      if (buf) {
-        const targetCount = Math.max(64, Math.floor(cssWidth / 3));
-        peaks = computePeaks(buf, targetCount);
-        setMeta(buf, msg.fileSize, msg.mime);
-      } else {
-        setMeta(null, msg.fileSize, msg.mime);
-      }
-      drawWaveform();
-    } else if (msg.type === 'error') {
-      meta.textContent = 'failed to load';
-      playerEl.dataset.state = 'error';
-      showStatus(msg.message, true);
+    switch (msg.type) {
+      case 'config':
+        autoplay = !!msg.autoplay;
+        setLoop(!!msg.loop);
+        if (typeof msg.volume === 'number') setVolume(msg.volume, false);
+        break;
+      case 'info':
+        info = msg.info;
+        renderMeta();
+        break;
+      case 'pause':
+        audio.pause();
+        break;
+      case 'audio':
+        await loadAudio(msg);
+        break;
+      case 'error':
+        meta.textContent = 'failed to load';
+        playerEl.dataset.state = 'error';
+        showStatus(msg.message, true);
+        break;
     }
   });
 
+  async function loadAudio(msg) {
+    const bytes = new Uint8Array(msg.bytes);
+    if (msg.reload) {
+      pendingResume = { time: audio.currentTime, playing: !audio.paused };
+      audio.pause();
+      clearStatus();
+    }
+    if (typeof msg.fileSize === 'number') fileSize = msg.fileSize;
+
+    setupCanvas();
+    const { buf, error } = await decodeForWaveform(bytes.buffer);
+    if (!buf && !msg.decoded && requestTranscode()) return;
+    if (error) showStatus(`waveform decode failed: ${error.message || error}`, true);
+
+    nativeSource = !msg.decoded;
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    objectUrl = URL.createObjectURL(new Blob([bytes], { type: msg.mime || 'audio/wav' }));
+    audio.src = objectUrl;
+    audio.playbackRate = SPEEDS[speedIdx];
+
+    audioBuffer = buf;
+    if (region && buf && region.end > buf.duration) setRegion(null);
+    rebuildPeaks();
+    renderMeta();
+    renderStats();
+    drawWaveform();
+  }
+
+  setSpeed(speedIdx);
   setupCanvas();
+  vscode.postMessage({ type: 'ready' });
 })();
