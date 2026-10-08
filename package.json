@@ -2,7 +2,7 @@
   "name": "every-sound-player",
   "displayName": "Every Sound Player",
   "description": "Play CAF, WAV, MP3, M4A, AAC, FLAC, OGG, OPUS, AIFF, AU, AC3, AMR, and more directly inside VS Code, with a clean waveform-based player.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "gotnull",
   "license": "MIT",
   "author": {

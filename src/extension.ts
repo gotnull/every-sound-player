@@ -47,21 +47,35 @@ class CafEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
     webviewPanel.webview.html = playerHtml(webviewPanel.webview, scriptUri, styleUri, fileName, formatLabel);
 
-    try {
-      const { bytes, mime, decoded } = await loadAudio(filePath, ext);
-      webviewPanel.webview.postMessage({
-        type: 'audio',
-        bytes: bytes.toString('base64'),
-        mime,
-        decoded,
-        fileSize: bytes.length,
-      });
-    } catch (err) {
-      webviewPanel.webview.postMessage({
-        type: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // The webview's Chromium build may lack a demuxer or codec for a format we
+    // treat as native (Ogg Opus in some VS Code builds). It asks us to transcode.
+    let transcodeRequested = false;
+    webviewPanel.webview.onDidReceiveMessage(msg => {
+      if (msg?.type === 'transcode' && !transcodeRequested) {
+        transcodeRequested = true;
+        sendAudio(webviewPanel.webview, () => loadTranscoded(filePath));
+      }
+    });
+
+    await sendAudio(webviewPanel.webview, () => loadAudio(filePath, ext));
+  }
+}
+
+async function sendAudio(webview: vscode.Webview, load: () => Promise<LoadedAudio>): Promise<void> {
+  try {
+    const { bytes, mime, decoded } = await load();
+    webview.postMessage({
+      type: 'audio',
+      bytes: bytes.toString('base64'),
+      mime,
+      decoded,
+      fileSize: bytes.length,
+    });
+  } catch (err) {
+    webview.postMessage({
+      type: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -76,6 +90,10 @@ async function loadAudio(filePath: string, ext: string): Promise<LoadedAudio> {
   if (nativeMime) {
     return { bytes: await fs.readFile(filePath), mime: nativeMime, decoded: false };
   }
+  return loadTranscoded(filePath);
+}
+
+async function loadTranscoded(filePath: string): Promise<LoadedAudio> {
   const wavPath = await convertToWav(filePath);
   try {
     return { bytes: await fs.readFile(wavPath), mime: 'audio/wav', decoded: true };

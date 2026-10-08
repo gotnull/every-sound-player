@@ -1,4 +1,5 @@
 (function () {
+  const vscode = acquireVsCodeApi();
   const playerEl = document.querySelector('.player');
   const audio = document.getElementById('audio');
   const playPause = document.getElementById('playPause');
@@ -19,6 +20,20 @@
   let cssHeight = 0;
   let hoverX = -1;
   let rafId = 0;
+  // True while playing the original file bytes; a failure then triggers one
+  // transcode request rather than an error.
+  let nativeSource = false;
+  let transcodeRequested = false;
+  let objectUrl = null;
+
+  function requestTranscode() {
+    if (transcodeRequested) return false;
+    transcodeRequested = true;
+    nativeSource = false;
+    meta.textContent = 'transcoding…';
+    vscode.postMessage({ type: 'transcode' });
+    return true;
+  }
 
   function showStatus(msg, isError) {
     status.hidden = false;
@@ -136,14 +151,12 @@
 
   async function decodeForWaveform(arrayBuffer) {
     const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) return null;
+    if (!Ctor) return { buf: null };
     const ac = new Ctor();
     try {
-      const buf = await ac.decodeAudioData(arrayBuffer.slice(0));
-      return buf;
+      return { buf: await ac.decodeAudioData(arrayBuffer.slice(0)) };
     } catch (e) {
-      showStatus(`waveform decode failed: ${e.message || e}`, true);
-      return null;
+      return { buf: null, error: e };
     } finally {
       ac.close && ac.close();
     }
@@ -192,6 +205,7 @@
   }
 
   audio.addEventListener('error', () => {
+    if (nativeSource && requestTranscode()) return;
     const e = audio.error;
     const codes = { 1: 'ABORTED', 2: 'NETWORK', 3: 'DECODE', 4: 'SRC_NOT_SUPPORTED' };
     showStatus(`Audio error: ${e ? codes[e.code] || e.code : 'unknown'}`, true);
@@ -257,11 +271,16 @@
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'audio') {
       const bytes = base64ToBytes(msg.bytes);
-      const blob = new Blob([bytes], { type: msg.mime || 'audio/wav' });
-      audio.src = URL.createObjectURL(blob);
-
       setupCanvas();
-      const buf = await decodeForWaveform(bytes.buffer);
+      const { buf, error } = await decodeForWaveform(bytes.buffer);
+      if (!buf && !msg.decoded && requestTranscode()) return;
+      if (error) showStatus(`waveform decode failed: ${error.message || error}`, true);
+
+      nativeSource = !msg.decoded;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(new Blob([bytes], { type: msg.mime || 'audio/wav' }));
+      audio.src = objectUrl;
+
       if (buf) {
         const targetCount = Math.max(64, Math.floor(cssWidth / 3));
         peaks = computePeaks(buf, targetCount);
